@@ -51,6 +51,7 @@ import (
 const (
 	planKey          string = "wkp.weave.works/node-plan"
 	masterLabel      string = "node-role.kubernetes.io/master"
+	originalMasterLabel string = "wkp.weave.works/original-master"
 	controllerName   string = "wks-controller"
 	controllerSecret string = "wks-controller-secrets"
 	bootstrapTokenID string = "bootstrapTokenID"
@@ -168,6 +169,14 @@ func (a *MachineActuator) initializeMasterPlanIfNecessary(installer *os.OS) erro
 	if err != nil {
 		return err
 	}
+
+	// we also use this method to mark the first master as the "originalMaster"
+	if _, exist := master.Labels[originalMasterLabel]; !exist {
+		if err := a.setNodeLabel(master, originalMasterLabel, ""); err != nil {
+			return err
+		}
+	}
+
 	if master.Annotations[planKey] == "" {
 		client := a.clientSet.CoreV1().ConfigMaps(a.controllerNamespace)
 		configMap, err := client.Get(os.SeedNodePlanName, metav1.GetOptions{})
@@ -770,6 +779,24 @@ func (a *MachineActuator) checkIfOriginalMasterNotAtVersion(kubernetesVersion st
 }
 
 func (a *MachineActuator) getOriginalMasterNode() (*corev1.Node, error) {
+	nodes, err := a.getMasterNodes()
+	if err != nil {
+		return nil, err
+	}
+	for _, node := range nodes {
+		_, isOriginalMaster := node.Labels[originalMasterLabel]
+		if isOriginalMaster {
+			return node, nil
+		}
+	}
+	// Hack for H/A testing
+	if len(nodes) == 0 {
+		return nil, errors.New("No master found")
+	}
+	return nodes[0], nil
+}
+
+func (a *MachineActuator) getOriginalMasterNode0() (*corev1.Node, error) {
 	client := a.clientSet.CoreV1().ConfigMaps("kube-system")
 	mapName := "kubeadm-config"
 	configMap, err := client.Get(mapName, metav1.GetOptions{})
@@ -778,6 +805,7 @@ func (a *MachineActuator) getOriginalMasterNode() (*corev1.Node, error) {
 	}
 	config := configMap.Data["ClusterConfiguration"]
 	var addr string
+	// TODO: controlPlaneEndpoint cannot be used to check for the original node any more
 	if results := hostAddrRegexp.FindStringSubmatch(config); results != nil {
 		addr = results[1]
 	} else {
@@ -1147,7 +1175,7 @@ func invokeFootlooseCreate(machine *clusterv1.Machine) (string, error) {
 }
 
 func isMaster(node *corev1.Node) bool {
-	_, isMaster := node.Labels["node-role.kubernetes.io/master"]
+	_, isMaster := node.Labels[masterLabel]
 	return isMaster
 }
 
