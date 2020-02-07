@@ -49,13 +49,13 @@ import (
 )
 
 const (
-	planKey          string = "wkp.weave.works/node-plan"
-	masterLabel      string = "node-role.kubernetes.io/master"
+	planKey             string = "wkp.weave.works/node-plan"
+	masterLabel         string = "node-role.kubernetes.io/master"
 	originalMasterLabel string = "wkp.weave.works/original-master"
-	controllerName   string = "wks-controller"
-	controllerSecret string = "wks-controller-secrets"
-	bootstrapTokenID string = "bootstrapTokenID"
-	clusterName      string = "firekube"
+	controllerName      string = "wks-controller"
+	controllerSecret    string = "wks-controller-secrets"
+	bootstrapTokenID    string = "bootstrapTokenID"
+	clusterName         string = "firekube"
 )
 
 type nodeType int
@@ -177,12 +177,13 @@ func (a *MachineActuator) initializeMasterPlanIfNecessary(installer *os.OS) erro
 		}
 	}
 
-	master, err := a.getMasterNode() // Only one can exist at this point
-	if err != nil {
-		return err
-	}
+	/*
+		master, err := a.getMasterNode() // Only one can exist at this point
+		if err != nil {
+			return err
+		}*/
 
-	if master.Annotations[planKey] == "" {
+	if originalMasterNode.Annotations[planKey] == "" {
 		client := a.clientSet.CoreV1().ConfigMaps(a.controllerNamespace)
 		configMap, err := client.Get(os.SeedNodePlanName, metav1.GetOptions{})
 		if err != nil {
@@ -198,7 +199,7 @@ func (a *MachineActuator) initializeMasterPlanIfNecessary(installer *os.OS) erro
 		if err != nil {
 			return err
 		}
-		if err = a.setNodeAnnotation(master, planKey, seedNodeStandardNodePlan.ToJSON()); err != nil {
+		if err = a.setNodeAnnotation(originalMasterNode, planKey, seedNodeStandardNodePlan.ToJSON()); err != nil {
 			return err
 		}
 	}
@@ -516,12 +517,12 @@ func (a *MachineActuator) kubeadmUpOrDowngrade(machine *clusterv1.Machine, node 
 
 	//
 	// For secondary masters
-	// version >= v1.15.0 uses: kubeadm upgrade node control-plane
-	// version >= v1.14.0 && < 1.15.0 uses: kubeadm upgrade node experimental-control-plane
+	// version >= 1.16.0 uses: kubeadm upgrade node
+	// version >= 1.14.0 && < 1.16.0 uses: kubeadm upgrade node experimental-control-plane
 	//
-	upgradeControlPlanFlag := "control-plane"
-	if ok, err := versionLessThan(version, "v1.15.0"); err != nil && ok {
-		upgradeControlPlanFlag = "experimental-control-plane"
+	secondaryMasterUpgradeControlPlaneFlag := ""
+	if lt, err := versionLessThan(version, "v1.16.0"); err == nil && lt {
+		secondaryMasterUpgradeControlPlaneFlag = "experimental-control-plane"
 	}
 
 	switch ntype {
@@ -533,7 +534,7 @@ func (a *MachineActuator) kubeadmUpOrDowngrade(machine *clusterv1.Machine, node 
 	case secondaryMaster:
 		b.AddResource(
 			"upgrade:node-kubeadm-upgrade",
-			&resource.Run{Script: object.String(fmt.Sprintf("kubeadm upgrade node %s", upgradeControlPlanFlag))},
+			&resource.Run{Script: object.String(fmt.Sprintf("kubeadm upgrade node %s", secondaryMasterUpgradeControlPlaneFlag))},
 			plan.DependOn("upgrade:node-install-kubeadm"))
 	case worker:
 		b.AddResource(
@@ -743,8 +744,11 @@ func versionLessThan(v1, v2 string) (bool, error) {
 }
 
 func parseVersion(v string) (int, int, int, error) {
-	chunks := strings.Split(v[1:], ".") // drop "v" at front
-	if len(chunks) != 3 {               // major.minor.patch
+	if strings.HasPrefix(v, "v") {
+		v = v[1:]
+	}
+	chunks := strings.Split(v, ".")
+	if len(chunks) != 3 { // major.minor.patch
 		return -1, -1, -1, fmt.Errorf("Invalid kubernetes version: %s", v)
 	}
 	var results = []int{-1, -1, -1}
