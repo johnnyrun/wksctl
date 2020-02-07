@@ -165,16 +165,21 @@ func (a *MachineActuator) create(ctx context.Context, cluster *clusterv1.Cluster
 // don't miss any updates. The plan is derived from the original seed node plan and stored in a config map
 // for use by the actuator.
 func (a *MachineActuator) initializeMasterPlanIfNecessary(installer *os.OS) error {
-	master, err := a.getMasterNode() // Only one can exist at this point
+
+	// we also use this method to mark the first master as the "originalMaster"
+	originalMasterNode, err := a.getOriginalMasterNode()
 	if err != nil {
 		return err
 	}
-
-	// we also use this method to mark the first master as the "originalMaster"
-	if _, exist := master.Labels[originalMasterLabel]; !exist {
-		if err := a.setNodeLabel(master, originalMasterLabel, ""); err != nil {
+	if _, exist := originalMasterNode.Labels[originalMasterLabel]; !exist {
+		if err := a.setNodeLabel(originalMasterNode, originalMasterLabel, ""); err != nil {
 			return err
 		}
+	}
+
+	master, err := a.getMasterNode() // Only one can exist at this point
+	if err != nil {
+		return err
 	}
 
 	if master.Annotations[planKey] == "" {
