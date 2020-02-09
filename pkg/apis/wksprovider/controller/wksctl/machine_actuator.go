@@ -177,12 +177,6 @@ func (a *MachineActuator) initializeMasterPlanIfNecessary(installer *os.OS) erro
 		}
 	}
 
-	/*
-		master, err := a.getMasterNode() // Only one can exist at this point
-		if err != nil {
-			return err
-		}*/
-
 	if originalMasterNode.Annotations[planKey] == "" {
 		client := a.clientSet.CoreV1().ConfigMaps(a.controllerNamespace)
 		configMap, err := client.Get(os.SeedNodePlanName, metav1.GetOptions{})
@@ -803,42 +797,6 @@ func (a *MachineActuator) getOriginalMasterNode() (*corev1.Node, error) {
 		return nil, errors.New("No master found")
 	}
 	return nodes[0], nil
-}
-
-func (a *MachineActuator) getOriginalMasterNode0() (*corev1.Node, error) {
-	client := a.clientSet.CoreV1().ConfigMaps("kube-system")
-	mapName := "kubeadm-config"
-	configMap, err := client.Get(mapName, metav1.GetOptions{})
-	if err != nil {
-		return nil, errors.New(fmt.Sprintf("failed to retrieve kubeadm-config config map: %v", err))
-	}
-	config := configMap.Data["ClusterConfiguration"]
-	var addr string
-	// TODO: controlPlaneEndpoint cannot be used to check for the original node any more
-	if results := hostAddrRegexp.FindStringSubmatch(config); results != nil {
-		addr = results[1]
-	} else {
-		return nil, errors.New("Could not obtain endpoint address")
-	}
-	nodes, err := a.getMasterNodes()
-	if err != nil {
-		return nil, err
-	}
-	for _, node := range nodes {
-		internalAddress, err := getInternalAddress(node)
-		if err != nil {
-			return nil, gerrors.Wrapf(err, "failed to retrieve internal node address")
-		}
-		if internalAddress == addr {
-			return node, nil
-		}
-	}
-	// Hack for H/A testing
-	if len(nodes) == 0 {
-		return nil, errors.New("No master found")
-	}
-	return nodes[0], nil
-	//return nil, errors.New("No original master node found")
 }
 
 func (a *MachineActuator) isOriginalMaster(node *corev1.Node) (bool, error) {
